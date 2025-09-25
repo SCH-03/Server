@@ -1,0 +1,32 @@
+namespace ServerCore
+{
+    class Program
+    {
+        volatile static bool _stop = false; //volatile : Debug 대신 Release 사용시 컴파일러 최적화 방지 이걸 사용해주지 않으면 최적화시 ThreadMain의 _stop값이 true로 바뀌지않아서 무한 루프를 돌게됨
+
+        static void ThreadMain()
+        {
+            Console.WriteLine("쓰레드 시작");
+            while(_stop == false) //최적화(Release) 디버그 시 while문 안에 while(true)문이 자동으로 생성되기때문에 volatile을 꼭 써줘야함
+            {
+                //누군가가 stop 신호를 해주기를 기다린다.
+            }
+            Console.WriteLine("쓰레드 종료");
+        }
+        static void Main(string[] args)
+        {
+            Task t = new Task(ThreadMain); //t에 ThreadMain 매서드를 담는다. Task는 .NET에서 제공해주는 델레게이트라 바로 사용가능함. public Task(Action action)로 반환값없이(Action) 선언되어있음.
+            t.Start(); //쓰레드 시작
+
+            Thread.Sleep(1000); //1초 대기
+
+            _stop = true; //쓰레드 종료 신호
+
+            Console.WriteLine("Stop 호출");
+            Console.WriteLine("종료 대기중");
+            t.Wait(); //쓰레드가 종료될 때까지 대기 종료시 Main함수의 쓰레드 종료가 출력됨
+            Console.WriteLine("종료"); //진짜 종료
+
+        }
+    }
+}
