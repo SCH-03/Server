@@ -1,0 +1,39 @@
+namespace ServerCore
+{
+   
+    class Program
+    {
+        static int number = 0;
+
+        static void Thread_1()
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                //int temp = number;                    //number++의 일련의 과정을 나타냄.
+                //temp += 1;                            //number++의 일련의 과정을 나타냄.
+                //number = temp;                        //number++의 일련의 과정을 나타냄.
+                //number++;                             각자의 쓰레드가 작업을 수행하는 도중에 다른 쓰레드가 끼어들 수 있어서 마지막 number 값이 계속해서 0이아닌 다른값이 출력되는 현상이 생김.
+                                                        //이러한 문제를 해결하기 위해 Interlocked클래스를 사용
+                Interlocked.Increment(ref number);      //원자성(전체를 하나의 과정으로 취급)을 갖음. 1증가하는 작업을 중간에 끊지 않고 끝까지 수행 해줌. 
+            }                                           //number를 ref(참조(주소값))값으로 가져오는 이유는 number 값은 계속해서 바뀔수있는 가능성이 있기때문에 실제 number값이 뭐든간에 그값에 +1을 해준값을 반환받는다고 생각하면됨.
+        }                                               //number 값을 int prev = number처럼 가져오게 되면 number값은 가져오는 순간까지도 계속해서 값이 바뀔수있기때문에 정확도가 떨어짐. 따라서 이러한 이유로 만약 값을 출력해보고싶다면 int Value = Interlocked.Increment(ref number);로 가져오면됨.
+        static void Thread_2()
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                Interlocked.Decrement(ref number);      //감소
+            }
+        }
+        static void Main(string[] args)
+        {
+            Task t1 = new Task(Thread_1);
+            Task t2 = new Task(Thread_2);
+
+            t1.Start();                                
+            t2.Start();                                 //t1 쓰레드가 끝날때까지 기다리는게 아닌 거의 동시에 두가지 쓰레드가 시작됨.            
+                
+            Task.WaitAll(t1, t2);                       //쓰레드 종료시 까지 기다림.
+            Console.WriteLine(number);                  // 항상 0 출력.
+        }
+    }
+}
