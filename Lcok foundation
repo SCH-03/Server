@@ -14,7 +14,7 @@ namespace ServerCore
                 Monitor.Enter(_lock);           //다른 스레드가 접근하지 못하게 문을 잠금.
                 {
                     number++;
-                    return;                    //쓰레드 자체를 나가버림.
+                    return;                    //쓰레드 자체를 나가버림.      //문을 잠그기만 하고 도망가서 다른곳에서 참조할 수 없는 상태로만듦으로써 DeadLock현상이 발생.
                 }
                 Monitor.Exit(_lock);           //작업이 끝났으니 문을 열어줌.
             }                                          
