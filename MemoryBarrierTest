@@ -1,0 +1,38 @@
+namespace ServerCore
+{
+   
+    class Program
+    {
+        static int _answer;                                   //static으로 변수와 매서드를 정적으로 만들어서 어디서든 참조할 수 있도록 해줌. 만약 static이 없을 시에는 어디서 이값들이 바뀔지 모르기 때문에 반드시 p._answer처럼 접근해줘야 됨.
+        static bool _complete;                                // Thread.MemoryBarrier를 쓰지않고 volatile을 써줘도 같은 기능을 함.
+
+        static void A()
+        {
+            _answer = 123;
+            Thread.MemoryBarrier();                           // 쓰기 순서 고정. (CPU 임의의 최적화로 인한 순서 변화를 막음)
+
+            _complete = true;
+            Thread.MemoryBarrier();
+        }
+        static void B()
+        {
+            Thread.MemoryBarrier();                          // 읽기 순서 고정.
+            if (_complete)
+            {
+                Thread.MemoryBarrier();
+                Console.WriteLine(_answer);
+            }
+        }
+
+        static void Main(string[] args)
+        {
+            Task t1 = new Task(A);
+            Task t2 = new Task(B);
+
+            t1.Start();
+            t2.Start();
+
+            Task.WaitAll(t1, t2);                             // Thread 실행이 끝날때까지 기다림.
+        }
+    }
+}
