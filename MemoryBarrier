@@ -1,0 +1,59 @@
+namespace ServerCore
+{
+    //메모리 배리어 기능
+    //A) 코드 재배치 억제 (최적화 방지)
+    //B) 가시성 (메뉴판 최신화)
+
+    // 1) Full Memory Barrier (ASH MFENCE, C# Thread.MemoryBarrier()) : Store/Load 둘다 막음.
+    // 2) Store Memory Barrier (ASH SFENCE) : Store 만 막음.
+    // 3) Load Memory Barrier (ASH LFENCE) : Load 만 막음.
+
+    class Program
+    {
+        static int x = 0;
+        static int y = 0;
+        static int r1 = 0;
+        static int r2 = 0;
+
+        static void Thread_1()
+        {
+            y = 1;
+
+            Thread.MemoryBarrier(); //간단하게 생각하자면 업데이트 문이다. 현재 주문받은 y =1 이라는 주문을 받았는데 다른 쓰레드(직원) 쪽에서는 이 사실을 모르기 때문에 현황판 최신화느낌.
+                                    //또한 이 명령어로 인해 하나의 장벽이 생겨 CPU가 임의로 재배치 할 수 없도록 막아줌. 따라서 메인쓰레드는 무한 루프를 돌게됨.
+            r1 = x;
+        }
+        static void Thread_2()
+        {
+            x = 1;
+
+            Thread.MemoryBarrier();
+
+            r2 = y;
+        }
+        static void Main(string[] args)
+        {
+            int count = 0;
+
+            while (true)
+            {
+                count++;
+                x = y = r1 = r2 = 0;
+
+                Task t1 = new Task(Thread_1);
+                Task t2 = new Task(Thread_2);
+                t1.Start();
+                t2.Start();
+
+                Task.WaitAll(t1, t2);
+
+                if (r1 == 0 && r2 == 0)
+                {
+                    break;
+                }
+            }
+            Console.WriteLine($"{count}번 만에 빠져나옴!"); // 그냥 보기에는 절대 r1과 r2가 둘다 0이 되는경우가 없어보이지만, 내부적으로 CPU가 명령어 재배치(최적화)를 하면서 둘다 0이 되는 경우가 발생할 수 있다.
+
+        }
+    }
+}
