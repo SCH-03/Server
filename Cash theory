@@ -1,0 +1,29 @@
+namespace ServerCore
+{
+    class Program
+    {
+       
+        static void Main(string[] args)
+        {
+            int[,] arr = new int[10000, 10000]; // 새로운 배열 생성 10000 * 10000       arr [행, 열] 
+
+            {
+                long now = DateTime.Now.Ticks; //경과 시간 확인
+                for (int y = 0; y < 10000; y++)
+                    for(int x = 0; x < 10000; x++)
+                        arr[y, x] = 1; 
+                long end = DateTime.Now.Ticks;
+                Console.WriteLine($"(y, x) 경과 시간{end - now}");  //시스템 적으로는 spacial locality(인근위치)로 인해서 아래의 경우보다 배열을 완성하는데 더 적은 시간이 걸림. - 캐시 친화적
+                                                                   //하지만 최근에는 시스템적으로 자체적인 최적화 시스템이 적용되기때문에 물론 지금도 약간의 차이가 존재하기는하지만 그 차이가 전보다는 크게 줄음.
+            }
+            {
+                long now = DateTime.Now.Ticks;
+                for (int y = 0; y < 10000; y++)
+                    for (int x = 0; x < 10000; x++)
+                        arr[x, y] = 1;
+                long end = DateTime.Now.Ticks;
+                Console.WriteLine($"(x, y) 경과 시간{end - now}");       
+            }
+        }
+    }
+}
