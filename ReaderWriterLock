@@ -1,0 +1,39 @@
+namespace ServerCore
+{
+ 
+    class Program
+    {
+        class Reward
+        {
+
+        }
+
+        static ReaderWriterLockSlim _lock = new ReaderWriterLockSlim();         //특수한 경우(정말 가끔사용하는)에만 사용하는 lock 
+                                                                                //락 메커니즘(사람들이 각자의 순서에 맞게 기다리면서 차례로 들어가는게 아니라 각자 화장실을 들른 타이밍에 문이 열려있을때 먼저 들어가는 사람이 임자)임. SpinLock도 이에 해당됨.
+                                                                                //신호/대기 메커니즘(각자 신사처럼 각자의 차례를 기다리면서 들어가는 것)임. AutoResetEvent, ManualResetEvent, Mutex 등이 해당됨.
+                                                                                //자주 사용 99.99999% 거의 고정되어있는 경우
+        static Reward GetRewardById(int id)
+        {
+            _lock.EnterReadLock();                      //읽을때만 사용
+                                                        //read의 경우 한번에 다양한 신호가 들어올 수 있음. 
+            _lock.ExitReadLock();                       //읽기가 끝났으면 lock을 해제
+
+            return null;                                //왜 null을 반환하지?
+                                                        //Reward의 내부적인 객체가 존재하지 않기때문에 null(주소, 객체가없음)을 반환하게 되는 것.
+        }
+
+
+        //정말 가끔 사용 0.00001%  (추가,삭제,수정이 필요한 경우)
+        static void AddReward(Reward reward)
+        {
+            _lock.EnterWriteLock();                     //쓸때만 사용 내용을 수정할때 사용함. 여기서는 예를 들어 퀘스트의 보상을 추가하거나 제거할때 사용하게됨
+                                                        //write의 경우 한번에 하나의 신호만 들어올 수 있음.
+            _lock.ExitWriteLock();                      //쓰기가 끝났으면 lock을 해제
+
+        }
+        static void Main(string[] args)
+        {
+           
+        }
+    }
+}
