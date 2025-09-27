@@ -1,0 +1,47 @@
+namespace ServerCore
+{
+ 
+    class Program
+    {
+        static int _num = 0;
+        static Mutex _lock = new Mutex();
+
+
+        //Mutex는 커널 방식을 사용해서 커널에서 Wait하는 경우가 있을 수 있기 때문에 다른 방식보다 상대적으로 무겁다.
+        //또한, 잠금 횟수(재진입 카운트)를 저장하고 있음. 확인할 수 있고 재진입 할 수 있다는 장점이 있지만 추가적인 값을 저장함으로써 무거워짐.
+        //ThreadId(스레드관리) 스레드 별로 Id를 갖기 때문에 오류 탐색시에는 이점이 있지만, 무거워진다는 단점이 있다.
+        static void Thread_1()
+        {
+            for(int i=0; i<100000; i++)
+            {
+                _lock.WaitOne();
+                _num++;
+                _lock.ReleaseMutex();                         
+            }
+        }
+        static void Thread_2()
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                _lock.WaitOne();
+                _num--;
+                _lock.ReleaseMutex();
+            }
+        }
+
+
+        static void Main(string[] args)
+        {
+            Task t1 = new Task(Thread_1);
+            Task t2 = new Task(Thread_2);
+
+            t1.Start();
+            t2.Start();
+
+            Task.WaitAll(t1, t2);
+
+            Console.WriteLine(_num);
+
+        }
+    }
+}
