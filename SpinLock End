@@ -1,6 +1,6 @@
 namespace ServerCore
 {
-  class SpinLock                       
+  class SpinLock                                                                                     //무한정으로 계속 기다림.
     {
         volatile int _locked = 0;                                                             
 
@@ -16,6 +16,11 @@ namespace ServerCore
                 int desired = 1;                                                                      //원하는 변환값 설정.
                 if(Interlocked.CompareExchange(ref _locked, desired, expected) == expected)           //Interlocked.CompareExchage로 원자성을 가져옴.
                     break;
+
+                //쉬다옴 랜덤으로 일정 시간 쉬었다가 다시 가서 화장실이 잠겨있는지 확인. 
+                Thread.Sleep(1); // 1ms 정도 무조건 쉼.
+                Thread.Sleep(0); // 조건부 양보. 나보다 우선순위가 높은 애들한테만 양보 가능. 나랑 같거나 낮은 애들은 양보 안하고 내가 실행.
+                Thread.Yield();  // 즉시 양보. 나보다 우선순위가 높은 애든 낮은 애든 상관없이 무조건 양보. / 실행가능한 애가 없을 경우 내가 다시 실행됨.
             }
         }
 
