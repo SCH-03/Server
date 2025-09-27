@@ -1,0 +1,59 @@
+namespace ServerCore
+{
+  class Lock                                                  //직원에게 화장실이 비었으면 알려달라고 부탁하는 경우.
+    {
+
+        //available(사용가능한) 상태를 bool로 생각하면 됨. 지금은 true로 문을 열어둔 상태로 시작.
+
+        AutoResetEvent _available = new AutoResetEvent(true); // 톨게이트같은 개념이고 true로 문이 열려있는 상태로 시작함. 문을 열고 닫음을 자동으로해줌.
+        public void Acquire()          
+        {
+            _available.WaitOne();                             // 문이 열려있으면 들어가서 문을 닫고 문을 닫음.
+            //_available.Reset();                             // 문을 닫음. WaitOne()에도 포함되어있음.  bool -> false
+        }
+
+        public void Release() 
+        {
+            _available.Set();                                  //다른 사람이 사용할 수 있게 문을 다시 연다. bool -> true
+        }
+    }
+    class Program
+    {
+        static int _num = 0;
+        static Lock _lock = new Lock();
+
+        static void Thread_1()
+        {
+            for(int i=0; i<100000; i++)
+            {
+                _lock.Acquire();
+                _num++;
+                _lock.Release();                         
+            }
+        }
+        static void Thread_2()
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                _lock.Acquire();
+                _num--;
+                _lock.Release();
+            }
+        }
+
+
+        static void Main(string[] args)
+        {
+            Task t1 = new Task(Thread_1);
+            Task t2 = new Task(Thread_2);
+
+            t1.Start();
+            t2.Start();
+
+            Task.WaitAll(t1, t2);
+
+            Console.WriteLine(_num);
+
+        }
+    }
+}
