@@ -1,0 +1,76 @@
+namespace ServerCore
+{
+   class SessionManager                                   //DeadLock현상을 확인하기위해서 각각의 매니저를 생성
+    {
+        static object _lock = new object();               //자물쇠 생성
+        public static void Test()                         //static이라고 해서 "값이 변하지 않는다"는 뜻은 아님.
+                                                          //"고정"이라는 의미보다는 클래스 차원에서 하나만 존재한다는 의미로 이해하는 게 정확함.
+        {
+            lock (_lock)
+            {
+                UserManager.TestUser();
+            }
+        }
+        public static void TestSession()
+        {
+            lock (_lock)
+            {
+
+            }
+        }
+    }
+    class UserManager
+    {
+        public static object _lock = new object();
+        public static void Test()
+        {
+            lock (_lock)
+            {
+                SessionManager.TestSession();
+            }
+        }
+        public static void TestUser()
+        {
+            lock (_lock)
+            {
+
+            }
+        }
+    }
+    class Program
+    {
+        static int number = 0;
+        static object _lock = new object();
+
+
+
+        static void Thread_1()
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                SessionManager.Test();
+            }                                          
+        }                                               
+        static void Thread_2()
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                UserManager.Test();
+            }
+        }
+        static void Main(string[] args)
+        {
+            Task t1 = new Task(Thread_1);
+            Task t2 = new Task(Thread_2);
+
+            t1.Start();
+
+            Thread.Sleep(100);                //딜레이를 넣어 실행 순서를 맞춰줌으로써 DeadLock 방지. 정상적으로 0 출력.
+
+            t2.Start();                                
+
+            Task.WaitAll(t1, t2);                       
+            Console.WriteLine(number);                  
+        }
+    }
+}
