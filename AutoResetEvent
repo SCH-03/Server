@@ -6,6 +6,7 @@ namespace ServerCore
         //available(사용가능한) 상태를 bool로 생각하면 됨. 지금은 true로 문을 열어둔 상태로 시작. 커널동기화 사용으로 SpinLock보다 자원 소모가 더큼.
 
         AutoResetEvent _available = new AutoResetEvent(true); // 톨게이트같은 개념이고 true로 문이 열려있는 상태로 시작함. 문을 열고 닫음을 자동으로해줌.
+                                                              // 커널모드 동기화 객체로 컨텍스트 스위칭(Thread.Sleep()처럼 다른 신호로 넘어가는 경우)이 발생할 수 있음.
         public void Acquire()          
         {
             _available.WaitOne();                             // 문이 열려있으면 들어가서 문을 닫음.
