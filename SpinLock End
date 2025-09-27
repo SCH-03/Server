@@ -34,7 +34,7 @@ namespace ServerCore
             for(int i=0; i<100000; i++)
             {
                 SpinLock.Acquire();                                 
-                _num++;                                              //혹여나 _num++ 이후의 다른 코드가 오게되면 그 즉시 원자성을 잃게됨.
+                _num++;                                              //Acquire와 Release 사이의 어떠한 코드가 와도 이미 _locked는 true이기 때문에 계속 원자성을 지님. 즉 _num++ 이외의 다른 코드가 연속되어도 됨.
                 SpinLock.Release();                                  //모데궁 종료.
             }
         }
