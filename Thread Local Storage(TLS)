@@ -1,0 +1,33 @@
+namespace ServerCore
+{
+ 
+    class Program
+    {
+        //ThreadLocal은 각 스레드별로 각자의 공간(TLS)을 만들어준다고 생각하면됨.
+        //만약 그냥 static string ThreadName으로 접근하게 되면 그 공간이 하나만 존재하기 때문에 한번에 많은 스레드가 접근하게 되는 경우가 생김. 이러한 단점을 해결하고자 ThreadLocal을 사용함.
+        static ThreadLocal<string> ThreadName = new ThreadLocal<string>(() => { return $"My Name Is {Thread.CurrentThread.ManagedThreadId}"; }); //ThreadLocal의 기능은 TLS 그 자체는 아니고 TLS공간을 접근할 수 있게해주는 컨트롤러 느낌.
+                                                                                                                                                 //초기에 ThreadName.Value를 실행하게 되면 람다를 실행해서 그값을 자신만의 TLS공간에  저장함.   그렇다면 이때 저장된 값은 내가 처리해야하는 일이라고 보는것인가?
+                                                                                                                                                 //static string ThreadName;으로 하면 5번실행해도 같은 스레드가 접근함
+                                                                                                                                                 //따로 빼서 람다로 return 값을 가져오는 이유는? : 초기 Value접근시 실행 함수 설정. ThreadLocal 클래스 내부적으로 그렇게 설정되어있음.
+        static void WhoAmI()
+        {
+
+            bool repeat = ThreadName.IsValueCreated;                    //Value가 초기화(람다가 실행)되었는지 안되었는지 확인. 내 사물함이 이미 만들어져 있는지 확인.
+            if (repeat)
+                Console.WriteLine(ThreadName.Value + "(repeat)");       //이미 저장되어있는 값에 repeat(반복)을 붙여서 출력. 여기서 Value는 TLS와 스레드(직원)을 연결 시켜주는 통로라고 생각하면됨. 이미 사물함이 만들어져있다면 사물함 번호와 repeat을 출력
+            else
+                Console.WriteLine(ThreadName.Value);                    //처음 접근했다면 Id를 리턴받고 값(일) 출력. 처음 접근했다면 사물함을 관리자(ThreadLocal<T>)가 사물함을 만들어줌.
+        }
+
+
+
+        static void Main(string[] args)
+        {
+            ThreadPool.SetMinThreads(1, 1);                    // 동시에 일할 수 있는 스레드의 갯수 설정
+            ThreadPool.SetMaxThreads(3, 3);                   
+            Parallel.Invoke(WhoAmI, WhoAmI, WhoAmI, WhoAmI, WhoAmI);            //함수를 넣는 횟수만큼 실행시켜줌.
+
+            ThreadName.Dispose();                              //사물함 열쇠를 없앰
+        }
+    }
+}
