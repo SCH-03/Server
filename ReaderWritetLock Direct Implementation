@@ -1,0 +1,92 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ServerCore
+{
+    class Lock
+    {
+        // 재귀적 락 허용, 스핀락 5000회 이후 Yield
+        // flag가 int 이기때문에 총 32비트를 사용
+        // 앞 [Unused(1비트)] [WriteThreadId(15비트)] [ReadCount(16비트)] 뒤
+
+        const int EMPTY_FLAG = 0x00000000;      // 왜 16진수로 표현하는가 표현은 뭐로하든 상관없음. 16진수가 사람이 읽기에 더 편해서 그런것임.
+        const int WRITE_MASK = 0x7FFF0000;      // 맨 앞 1비트는 -부호 사용을 위해서 사용하지 않는것
+        const int READ_MASK = 0x0000FFFF;       // 0000 0000 0000 0000 0000 1111 1111 1111 1111
+                                                // 앞에 WriteThreadId로 하고 뒤에 ReadCount로 하는 이유는? 서로 순서가 바뀌어도 상관없는지? : 상관없지만 뒤를 ReadCount로 하는 이유는 ReadCount가 자주 바뀌기 때문에 뒤에 있는게 더 효율적임.
+        const int MAX_SPIN_COUNT = 5000;
+
+        int _flag = EMPTY_FLAG;
+        int _writeCount = 0;
+
+        public void WriteLock()
+        {
+            int lockThreadId = (_flag & WRITE_MASK) >> 16;
+            if( Thread.CurrentThread.ManagedThreadId == lockThreadId)                 // 현재 접근한 스레드의 아이디와 현재 접근해 있는 스레드 아이디를 비교함.
+            {
+                _writeCount++;                                                        // 동일한 스레드가 맞다면 Count를 1늘려줌으로써 잠금을 하나 더 추가함.
+                return;                                                               // 매서드 자체를 나가는 것인가 아니면 if문만 나가는건가 코드적으로는 매서드 자체를 나가야 성립한다고보임. break가 조건문만 나가는 것인가?  : return은 매서드 자체를 나가고 break는 조건문만 빠져나옴.
+            }
+
+
+            int desired = (Thread.CurrentThread.ManagedThreadId << 16 )& WRITE_MASK;  // 접근 스레드의 ID를 16비트 왼쪽으로 쉬프트(뒤 16비트는 readcount의 영역이기때문에)해서 WRITE_MASK와 AND연산을 수행해서 부여해줌. 
+                                                                                      // WriteThred는 한번에 하나의 스레드만 접근하지만 재귀적 락을 허용하기 떄문에 동일 스레드가 접근을 요청했을 경우 들여보내주기 위해 아이디 저장.
+                                                                                      // 보통 정보를 수정해주는경우 재귀적 락을 이용함.
+            int expected = EMPTY_FLAG;
+            
+            while (true)
+            {
+                for (int i = 0; i < MAX_SPIN_COUNT; i++)
+                {
+                    if (Interlocked.CompareExchange(ref _flag, desired, expected) == expected)   // 조건 부합시 _flag가 현재 진입 스레드의 Id로 변경됨.
+                    {
+                        _writeCount = 1;                                                         // 처음 진입한 스레드의 writelock 카운트를 1로 설정해줌 만약 재접근 시에는 이 코드에 들어오지않고 위에서 카운트만 1 늘려줌.
+                        return;
+                    }
+                }
+
+                Thread.Yield();                  //5000번 시도 후 실패시 다른 스레드에게 양보
+            }
+        }
+        public void WriteUnlock()
+        {
+            int _lockCount = --_writeCount;
+            if (_lockCount == 0)
+                Interlocked.Exchange(ref _flag, EMPTY_FLAG);
+                                                                        //int _flag = EMPTY_FLAG; 원자성을 갖지 않기떄문에 다른 필드에서 접근해서 값을 바꿀수있어서 문제가 발생할 수 있음. 보기엔 원자성을 갖는것 처럼 보이지만 실제로는 여러 단계로 나뉘어져있음.
+                                                                        //지역변수( {} 블록 내부 변수), 필드변수(class 자체의 변수로 class 내부에서는 어디서든 사용가능), 매개변수(함수의 인자 / 지역변수 같은 느낌)
+        }
+        public void Readlock()
+        {
+            int lockThreadId = (_flag & WRITE_MASK) >> 16;              
+            if (Thread.CurrentThread.ManagedThreadId == lockThreadId)   //writelock을 하고있는 스레드와 같은 스레드인지 확인. writelock 을 하고있는 동일 스레드가 요청하는건지 확인.
+            {
+                _flag++;                      //ReadCount를 1늘려줌.
+                return;                                                 //이미 writelock에서 원자적 주도권을 가져왔기 때문에 바로 return해버림.
+            }
+
+            int expected = _flag & READ_MASK;                           // writelock을 하고있는 경우을 제외한 경우를 체크하기 위한 예상값.
+            while (true)
+            {
+                for (int i = 0; i < MAX_SPIN_COUNT; i++)
+                {
+                    if (Interlocked.CompareExchange(ref _flag, expected + 1, expected) == expected)   // 이미 writelock과 관계없는 상황(위에서 처리)이기 때문에 readlockcount만 신경써주면 되기때문에 문제 될게없음.
+                    {                                                                                 // readlock을 들어오면 writelock에서는 각 스레드에 id를 부여해줬던것 처럼 _flag에 readlock count(+1)를 넣어줌.
+                        return;
+                    }
+                }
+
+                Thread.Yield();
+            }
+
+
+            
+        }
+        public void ReadUnlock()
+        {
+            Interlocked.Decrement(ref _flag);   //만약 writelock과 readlock을  같이 하고있는 상태라면 readunlock을 먼저 해주고 writeunlock을 해줘야함.
+        }
+    }
+}
