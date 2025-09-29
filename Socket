@@ -1,0 +1,103 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+
+namespace ServerCore    //식당(서버)
+{
+ 
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            //DNS 도메인
+            string host = Dns.GetHostName();                // 로컬 호스트명(내 컴퓨터의 이름)을 가져온다. 도메인과는 다른 개념으로 컴퓨터 자체의 이름을 뜻한다.
+            IPHostEntry ipHost = Dns.GetHostEntry(host);    // 호스트에 들어가서 사용중인 ip 리스트를 가져온다
+            IPAddress ipAddr = ipHost.AddressList[0];       // 식당 주소를 가져옴. 가져온 ip 리스트중 가장 첫번째 ip주소를 가져옴.
+            IPEndPoint endPoint = new IPEndPoint(ipAddr, 7777); // 최종적으로 식당의 위치와 문을 지정해줌. 가져온 식당 주소와 7777이라는 포트(식당의 문) 번호를 설정해줌.
+            
+            // 문지기
+            Socket listenSocket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);  //문지기이자 문지기의 핸드폰(손님과의 소통(문의)을위한)을 만들어줌
+            
+            // 문지기 교육 손님을 받을 준비
+            listenSocket.Bind(endPoint);    // 문지기에게 식당의 위치와 문 위치를 알려줌. 식당입구에 배치
+
+            // 영업시작 손님이 오길 기다림
+            listenSocket.Listen(10);    // 최대 대기자 수를 10으로 제한
+
+            try
+            {
+                while (true)
+                {
+                    Console.WriteLine("Listening...");
+
+                    // 손님 입장
+                    Socket clientSocket = listenSocket.Accept(); // 손님과 소통할 수 있는 핸드폰을 식당 내부에 만들어줌. 결국 소유권은 식당이 갖고있는 핸드폰이라고 보면되는가?
+
+                    //받는다.
+                    byte[] recvBuff = new byte[1024];                               // 최대 받을 수 있는 크기를 정해준다.
+                    int recvBytes = clientSocket.Receive(recvBuff);                 // 실제로 받은 byte수를 반환받는다. 이때 recvBuff에는 실제 데이터가 들어가게 된다 ex) 'H', 'E', 'L', 'L', 'O'
+                    string recvData = Encoding.UTF8.GetString(recvBuff, 0, recvBytes);  // recvBuff의 0번 인덱스부터 recvBytes로 받아온 번호까지의 배열을 출력한다. 즉 HELLO 가 저장됨. 
+                    Console.WriteLine($"[From Client] {recvData}");                 // 손님으로부터 받은 내용을 출력.
+
+
+                    //보낸다.
+                    byte[] sendBuff = Encoding.UTF8.GetBytes("Welcome to MMORPG Server !"); // 손님에게 보낼 내용을 인코딩 해서 byte형태로 저장
+                    clientSocket.Send(sendBuff);                                            // 손님에게 그 내용을 보낸다.
+
+
+                    // 손님 쫓아내기
+                    clientSocket.Shutdown(SocketShutdown.Both);                      // 손님과 연락하던 핸드폰을 송수신 불가능으로 만듬
+                    clientSocket.Close();                                            // 손님과 연락하던 핸드폰과의 연결을 끊는다. 같은 손님이 오더라도 새로 생성해야됨.
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.ToString());
+            }
+           
+        }
+    }
+}
+
+
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices.JavaScript;
+using System.Text;
+
+namespace DummyClient; // 손님 client
+
+internal class Program
+{
+    static void Main(string[] args)
+    {
+        string host = Dns.GetHostName();                            // 내컴퓨터 이름을 가져옴
+        IPHostEntry ipHost = Dns.GetHostEntry(host);                // 내 컴퓨터의 ip 리스트를 가져옴.
+        IPAddress ipAddr = ipHost.AddressList[0];                   // ip 리스트중 가장 첫번째 ip를 가져옴
+        IPEndPoint endPoint = new IPEndPoint(ipAddr, 7777);         // ip주소와 포트 번호를 설정해줌으로써 내가 접근하고 싶은 서버(식당)의 위치와 포트를 저장한다.
+        
+        // 문지기와의 소통을 위한 손님의 핸드폰 생성
+        Socket socket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);    
+            
+
+        // 문지기 입장문의
+        socket.Connect(endPoint); 
+        Console.WriteLine($"Connected To {socket.RemoteEndPoint.ToString()}");
+
+        // 클라이언트 -> 서버
+        byte[] sendBuff = Encoding.UTF8.GetBytes("Hello World!");       // 서버에게 보낼 내용을 인코딩
+        int sendBytes = socket.Send(sendBuff);                          // 서버에게 보냄
+
+        // 클라이언트 <- 서버
+        byte[] recvBuff = new byte[1024];
+        int recvBytes = socket.Receive(recvBuff);                       // 받은 내용을 recvBuff에 저장하고 그 크기를 recvBytes에 저장
+        string recvData = Encoding.UTF8.GetString(recvBuff, 0, recvBytes);  // 받은 데이터를 인코딩해서 저장
+        Console.WriteLine($"[From Server] {recvData}");                 // 받은 내용 출력
+
+
+        // 연결 종료
+        socket.Shutdown(SocketShutdown.Both);
+        socket.Close();
+    }
+}
+
