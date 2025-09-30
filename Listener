@@ -11,13 +11,13 @@ namespace ServerCore
     class Listener  //문지기를 분리해서 관리
     {
         Socket _listenSocket;
-        Action<Socket> _onAcceptHandler; //반환 값 없는 델레게이트 함수를 받아오기위해 선언? 
+        Action<Socket> _onAcceptHandler; //반환 값 없는 델레게이트 함수를 받아오기위해 선언?
 
-        public void Init(IPEndPoint endPoint, Action<Socket> onAcceptHandler)  // 식당의 주소와 핸드폰 생성 함수를 델레게이트로 받아와서 문지기 초기화.
+        public void Init(IPEndPoint endPoint, Action<Socket> onAcceptHandler)  // 식당의 주소와 대리자 핸드폰 생성 함수를 델레게이트로 받아와서 문지기 초기화.
         {
            
             _listenSocket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);  //문지기이자 문지기의 핸드폰(손님과의 소통(문의)을위한)을 만들어줌
-            _onAcceptHandler += onAcceptHandler;        // 매개 변수로 받은 함수를 구독?
+            _onAcceptHandler += onAcceptHandler;        // 매개 변수로 받은 함수를 저장. 
 
             // 문지기 교육 손님을 받을 준비
             // 문지기에게 식당의 위치와 문 위치를 알려줌. 식당입구에 배치
@@ -29,27 +29,27 @@ namespace ServerCore
 
             SocketAsyncEventArgs args = new SocketAsyncEventArgs();                             // args는 문지기 Socket의 현재 상태를 받아옴. 클라이언트의 현재 상황을 나타냄 (Accept, send, receive, Error(입장 성공/실패))  
             args.Completed += new EventHandler<SocketAsyncEventArgs>(OnAcceptCompleted);        // 손님이 pending = true (보류중) 에 식당에 들어왔을 때를 대비해서 Handler를 Completed 상황에 자동으로 실행되도록 함수를 구독함.
-            RegisterAccept(args);                                                               
+            RegisterAccept(args);                                                               // 손님의 상태를 넘겨줌.
         }
 
 
 
-        void RegisterAccept(SocketAsyncEventArgs args)  // 비동기 형식 중 클라이언트가 접근을 신청했는지 확인, 받아오는 args 매개변수가 어떤 역할을 하는지?
+        void RegisterAccept(SocketAsyncEventArgs args)  // args는 서버 내부 손님 대리자 소켓의 상태를 받음.
         {                                               
-            args.AcceptSocket = null;                   // 클라이언트 대리자 생성 후 다음 손님을 받기위해 null로 초기화. AcceptSocket이 무슨 값을 나타내는지 즉 여기서 무엇들을 null로 밀어주는지? 
+            args.AcceptSocket = null;                   // 클라이언트 대리자 생성 후 다음 손님을 받기위해 null로 초기화. args.AcceptSocket는 손님과의 소통을 위한 대리자의 핸드폰을 뜻함.  
 
-            bool pending = _listenSocket.AcceptAsync(args); // pending -> 보류중 을 뜻하기 때문에 _listenSocket.AcceptAsync로 현재 접근 중인지 bool값으로 확인
-            if (pending == false)                           // 보류중이 아닌 영업이 시작되자마자 손님이 들어왔을 경우만 처리 해주기때문에 위에 초기화 함수에서 따로 델레게이트를 받음.
+            bool pending = _listenSocket.AcceptAsync(args); // pending -> 보류중 을 뜻하기 때문에 _listenSocket.AcceptAsync로 현재 접근 중인지 bool값으로 확인 // AcceptAsync는 현재 args를 받아서 OS에게 손님을 비동기로 받을 준비를 하라고 얘기하고 즉시 처리 상태를 bool값으로 받음.
+            if (pending == false)                           // 보류중이 아닌 영업이 시작되자마자 손님이 들어왔을 경우만 처리 해주기때문에 위에 초기화 함수에서 따로 델레게이트로 true인 상황에서 false로 바뀌는 상황을 처리해줌.
                 OnAcceptCompleted(_listenSocket, args);     // sender(이벤트 발생 주체) : 문지기 , args(손님의 상태) : 손님 소켓의 상태 
         }
 
 
 
-        void OnAcceptCompleted(object sender, SocketAsyncEventArgs args)        // sender는 문지기 자체를 받고 args는 손님의 소켓을 받아옴
+        void OnAcceptCompleted(object sender, SocketAsyncEventArgs args)        // sender는 문지기 소켓을 받고 args는 손님의 대리자 소켓의 상태를 받아옴
         {
             if(args.SocketError == SocketError.Success)     // 클라이언트가 입장을 완료 했다면
             {
-                _onAcceptHandler.Invoke(args.AcceptSocket); // 클라이언트의 대리자 핸드폰 생성 // 이때 AcceptSocket은 클라이언트의 본인 핸드폰 ( 손님 <-> 문지기)
+                _onAcceptHandler.Invoke(args.AcceptSocket); // 대리자 소켓(clientSocket)을 매개변수로 받아 아까 초기화 함수에서 저장해둔 함수를 실행해서 클라이언트의 대리자 핸드폰 생성 // 이때 AcceptSocket은 클라이언트의 서버 내부 대리자 핸드폰 ( 손님 <-> 문지기)
             }
             else
                 Console.WriteLine(args.SocketError.ToString());     //클라이언트의 소캣이 생성 되지않았을 시 에러내용 출력
@@ -61,8 +61,8 @@ namespace ServerCore
 
         //public Socket Accept() // 손님을 받음
         //{
-        //    _listenSocket.AcceptAsync();    // 비동기식 처리방식을 이용하기때문에 클라이언트가 오지않아도 다음 코드로 넘어감. 
-        //    return _listenSocket.Accept(); // 동기식 처리방식을 사용하기 때문에 실제 클라이언트가 올 때까지 멈춰있는다는 단점이있음.
+        //    _listenSocket.AcceptAsync();    // 비동기식 처리방식을 이용하기때문에 클라이언트가 오지않아도 다음 코드로 넘어감 (대기상태). 
+        //    return _listenSocket.Accept(); // 동기식 처리방식을 사용하기 때문에 실제 클라이언트가 올 때까지 그 자리에 멈춰있는다는 단점이있음.
         //}
     }
 }
@@ -115,7 +115,7 @@ namespace ServerCore    //식당(서버)
             _listener.Init(endPoint, OnAcceptHandler);
             Console.WriteLine("Listening...");
 
-            while (true)
+            while (true) //손님이 없으면 대기.
             {
                 ;
             }
