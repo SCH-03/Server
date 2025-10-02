@@ -1,0 +1,191 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices.JavaScript;
+using System.Text;
+
+namespace DummyClient; // 손님 client
+
+internal class Program
+{
+    static void Main(string[] args)
+    {
+        string host = Dns.GetHostName();                            // 내컴퓨터 이름을 가져옴
+        IPHostEntry ipHost = Dns.GetHostEntry(host);                // 내 컴퓨터의 ip 리스트를 가져옴.
+        IPAddress ipAddr = ipHost.AddressList[0];                   // ip 리스트중 가장 첫번째 ip를 가져옴
+        IPEndPoint endPoint = new IPEndPoint(ipAddr, 7777);         // ip주소와 포트 번호를 설정해줌으로써 내가 접근하고 싶은 서버(식당)의 위치와 포트를 저장한다.
+        
+        
+
+        while (true)                // 1초에 한번씩 클라이언트가 접속
+        {
+            // 문지기와의 소통을 위한 손님 자체의 핸드폰 생성
+            Socket socket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                // 문지기 입장문의
+                socket.Connect(endPoint);
+                Console.WriteLine($"Connected To {socket.RemoteEndPoint.ToString()}");
+
+                for(int i = 0; i < 5; i++)
+                {
+                    // 클라이언트 -> 서버
+                    byte[] sendBuff = Encoding.UTF8.GetBytes($"Hello World! {i}");       // 서버에게 보낼 내용을 인코딩
+                    int sendBytes = socket.Send(sendBuff);
+                }
+                                       // 서버에게 보냄
+
+                // 클라이언트 <- 서버
+                byte[] recvBuff = new byte[1024];
+                int recvBytes = socket.Receive(recvBuff);                       // 받은 내용을 recvBuff에 저장하고 그 크기를 recvBytes에 저장
+                string recvData = Encoding.UTF8.GetString(recvBuff, 0, recvBytes);  // 받은 데이터를 인코딩해서 저장
+                Console.WriteLine($"[From Server] {recvData}");                 // 받은 내용 출력
+
+
+                // 연결 종료
+                socket.Shutdown(SocketShutdown.Both);
+                socket.Close();
+            }
+            catch(Exception ex) 
+            {
+                Console.WriteLine($"Connected To {socket.RemoteEndPoint.ToString()}");
+            }
+            Thread.Sleep(100);
+        }
+        
+    }
+}
+
+
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ServerCore
+{
+    class Listener  //문지기를 분리해서 관리
+    {
+        Socket _listenSocket;
+        Action<Socket> _onAcceptHandler; //반환 값 없는 델레게이트 함수를 받아오기위해 선언? 
+
+        public void Init(IPEndPoint endPoint, Action<Socket> onAcceptHandler)  // 식당의 주소와 핸드폰 생성 함수를 델레게이트로 받아와서 문지기 초기화.
+        {
+           
+            _listenSocket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);  //문지기이자 문지기의 핸드폰(손님과의 소통(문의)을위한)을 만들어줌
+            _onAcceptHandler += onAcceptHandler;        // 매개 변수로 받은 함수를 구독?
+
+            // 문지기 교육 손님을 받을 준비
+            // 문지기에게 식당의 위치와 문 위치를 알려줌. 식당입구에 배치
+            _listenSocket.Bind(endPoint);
+
+            // 영업시작 손님이 오길 기다림
+            // 최대 대기자 수를 10으로 제한
+            _listenSocket.Listen(10);   
+
+            SocketAsyncEventArgs args = new SocketAsyncEventArgs();                             // args는 문지기 Socket의 현재 상태를 받아옴. 클라이언트의 현재 상황을 나타냄 (Accept, send, receive, Error(입장 성공/실패))  
+            args.Completed += new EventHandler<SocketAsyncEventArgs>(OnAcceptCompleted);        // 손님이 pending = true (보류중) 에 식당에 들어왔을 때를 대비해서 Handler를 Completed 상황에 자동으로 실행되도록 함수를 구독함.
+            RegisterAccept(args);                                                               
+        }
+
+
+
+        void RegisterAccept(SocketAsyncEventArgs args)  // 초기화에서 바로 등록함수로 args(손님의 상태)를 매개변수로 받아서 들어옴
+        {                                               
+            args.AcceptSocket = null;                   // 클라이언트 대리자 생성 후 다음 손님을 받기위해 null로 초기화. AcceptSocket은 손님
+
+            bool pending = _listenSocket.AcceptAsync(args); // pending -> 보류중 을 뜻하기 때문에 _listenSocket.AcceptAsync로 현재 접근 중인지 bool값으로 확인
+            if (pending == false)                           // 보류중이 아닌 영업이 시작되자마자 손님이 들어왔을 경우만 처리 해주기때문에 위에 초기화 함수에서 따로 델레게이트를 받음.
+                OnAcceptCompleted(_listenSocket, args);     // sender(이벤트 발생 주체) : 문지기 , args(손님의 상태) : 손님 소켓의 상태 
+        }
+
+
+
+        void OnAcceptCompleted(object sender, SocketAsyncEventArgs args)        // sender는 문지기 자체를 받고 args는 손님의 소켓을 받아옴
+        {
+            if(args.SocketError == SocketError.Success)     // 클라이언트가 입장을 완료 했다면
+            {
+                _onAcceptHandler.Invoke(args.AcceptSocket); // 클라이언트의 대리자 핸드폰 생성 // 이때 AcceptSocket은 클라이언트의 본인 핸드폰 ( 손님 <-> 문지기)
+            }
+            else
+                Console.WriteLine(args.SocketError.ToString());     //클라이언트의 소캣이 생성 되지않았을 시 에러내용 출력
+
+            RegisterAccept(args);   // 소캣 생성이 완료되었으니 다음 손님을 받기위해 다시 등록 RegisterAccept로 돌아감 사실상 초기 Init을 해주면 while문을 도는것과 같은 현상을 보임.
+        }
+
+    }
+}
+
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ServerCore
+{
+    class Session
+    {
+        Socket _socket;
+        int _disconnected = 0;
+        public void Connect(Socket socket)
+        {
+            _socket = socket;
+            SocketAsyncEventArgs recvArgs = new SocketAsyncEventArgs();
+            recvArgs.Completed += new EventHandler<SocketAsyncEventArgs>(OnRecvCompleted);
+            recvArgs.SetBuffer(new byte[1024], 0, 1024);    // 총 크기, 사용할 부분 시작, 끝
+
+            RegisterRecv(recvArgs);
+        }
+
+        public void Disconnect()
+        {
+            if (Interlocked.Exchange(ref _disconnected, 1) == 1)
+                return;
+
+            _socket.Shutdown(SocketShutdown.Both);                      // 손님과 연락하던 핸드폰을 송수신 불가능으로 만듬
+            _socket.Close();
+        }
+
+        public void Send(byte[] sendBuff)
+        {
+            _socket.Send(sendBuff);
+        }
+        
+        #region 네트워크통신
+        void RegisterRecv(SocketAsyncEventArgs args)
+        {
+            bool pending = _socket.ReceiveAsync(args);
+            if (pending == false )
+                    OnRecvCompleted(null, args);       
+        }
+        void OnRecvCompleted(object sender, SocketAsyncEventArgs args)
+        {
+
+            if(args.BytesTransferred > 0 && args.SocketError == SocketError.Success) //BytesTransferred 몇바이트를 가져왔느냐 0바이트는 상대방이 연결을 끊은경우를 나타냄. 지금 조건은 상대방과 연결이 되어있고 클라이언트의 접속이 완료 되었을 경우를 조건으로 봄.
+            {
+                try
+                {
+                    Console.WriteLine(args.BytesTransferred);
+                    string recvData = Encoding.UTF8.GetString(args.Buffer, args.Offset, args.BytesTransferred); //Buffer는 바이트의 총량 / offset은 시작점 / bytesTransferred 는 클라이언트로 부터 받은 바이트(내용) 을나타냄.
+                    Console.WriteLine($"[From Client] {recvData}");
+                    RegisterRecv(args);
+                }
+                catch(Exception e)
+                {
+                    Console.WriteLine($"OnRecCompleted Failed{e}");
+                }
+            }
+            else
+            {
+
+            }
+        }
+        #endregion
+    }
+}
