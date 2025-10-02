@@ -1,0 +1,134 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ServerCore
+{
+    class Session
+    {
+        Socket _socket;
+        int _disconnected = 0;
+
+
+
+        object _lock = new object();                                    // 동시다발적인 전송과 수신을 막기위해서 lock 을 사용.
+        Queue<byte[]> _sendQueue = new Queue<byte[]>();                 // 전송 데이터를 한번에 모아서 보내기위해서 큐에 모아둘 저장공간을 생성
+    
+        SocketAsyncEventArgs _sendArgs = new SocketAsyncEventArgs();
+        SocketAsyncEventArgs _recvArgs = new SocketAsyncEventArgs();
+        List<ArraySegment<byte>> _pendingList = new List<ArraySegment<byte>>();
+
+        public void Connect(Socket socket)
+        {
+            _socket = socket;
+            _recvArgs.Completed += new EventHandler<SocketAsyncEventArgs>(OnRecvCompleted);
+            _recvArgs.SetBuffer(new byte[1024], 0, 1024);    // 총 크기, 사용할 부분 시작, 끝
+
+            _sendArgs.Completed += new EventHandler<SocketAsyncEventArgs>(OnSendCompleted);
+
+            RegisterRecv();
+        }
+
+        public void Disconnect()
+        {
+            if (Interlocked.Exchange(ref _disconnected, 1) == 1)
+                return;
+
+            _socket.Shutdown(SocketShutdown.Both);                      // 손님과 연락하던 핸드폰을 송수신 불가능으로 만듬
+            _socket.Close();
+        }
+
+        public void Send(byte[] sendBuff)
+        {
+            lock (_lock)    // 한번에 한명만 전송 작업에 들어옴.
+            {
+                _sendQueue.Enqueue(sendBuff);       // 보낼내용 저장
+                if (_pendingList.Count == 0)        // 전송중인 데이터가 없다면
+                    RegisterSend();
+            }
+            
+        }
+        
+        #region 네트워크통신
+
+        void RegisterSend()
+        {                              // RegisterSend에 들어온 후 true로 만듦으로써 다음 전송 내용을 큐에 미리 저장해둘 수 있도록함. 만약 false면 Send에서 등록으로 바로 넘어오기때문에 문제가 생길수있음.
+            /*byte[] buff = _sendQueue.Dequeue();       */      // 저장되어있는 배열 자체를 가져옴 buff = [10] [12] [34] [56].
+            /*_sendArgs.SetBuffer(buff, 0, buff.Length);*/      // 저장되어있는 내용을 가져옴. lenght는 4가된다. // setbuffer는 args 내부 버퍼에 전송할 데이터들을 준비시킨다 라는 의미.
+
+            // SetBuffer는 데이터를 큰 배열(상자)을 만들어서 그안에 넣고 전송대기를 시켜 메모리 복사가 발생하는데 [1] [2] [3] [4] -> [1234]되어서 전송
+            // BufferList를 이용하면 각각의 작은 데이터들을 순서에 맞게 저장시켜 전송대기를 시킴 으로써 추가적인 작업없이 전송가능함. [1] [2] [3] [4] -> [1] [2] [3] [4] 각각의 조각으로 전송
+
+            while (_sendQueue.Count > 0)
+            {
+                byte[] buff = _sendQueue.Dequeue();
+                _pendingList.Add(new ArraySegment<byte>(buff, 0, buff.Length));
+            }
+
+            _sendArgs.BufferList = _pendingList;    
+
+            bool pending = _socket.SendAsync(_sendArgs);
+            if (pending == false)
+                OnSendCompleted(null, _sendArgs);
+        }
+
+        void OnSendCompleted(object sender, SocketAsyncEventArgs args)
+        {   
+            lock (_lock)                    // 콜백함수로 들어오는 경우를 커버해주기위해서 락으로 걸어줌
+            {
+                if (args.BytesTransferred > 0 && args.SocketError == SocketError.Success)
+                {
+                    try
+                    {
+                        _sendArgs.BufferList = null;
+                        _pendingList.Clear();
+                        Console.WriteLine($"Transfferd bytes{_sendArgs.BytesTransferred}");
+
+                        if (_sendQueue.Count > 0)           // 서버에서 전송하는 동안(_pendingList.Count == 0) Queue에 전송데이터가 저장되어있다면
+                            RegisterSend();                 
+                               
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"OnRecCompleted Failed{e}");
+                    }
+                }
+            }
+            
+        }
+
+        void RegisterRecv()
+        {
+            bool pending = _socket.ReceiveAsync(_recvArgs);
+            if (pending == false )
+                    OnRecvCompleted(null, _recvArgs);       
+        }
+        void OnRecvCompleted(object sender, SocketAsyncEventArgs args)
+        {
+
+            if(args.BytesTransferred > 0 && args.SocketError == SocketError.Success) //BytesTransferred 몇바이트를 가져왔느냐 0바이트는 상대방이 연결을 끊은경우를 나타냄. 지금 조건은 상대방과 연결이 되어있고 클라이언트의 접속이 완료 되었을 경우를 조건으로 봄.
+            {
+                try
+                {
+                    Console.WriteLine(args.BytesTransferred);
+                    string recvData = Encoding.UTF8.GetString(args.Buffer, args.Offset, args.BytesTransferred); //Buffer는 바이트의 총량 / offset은 시작점 / bytesTransferred 는 클라이언트로 부터 받은 바이트(내용) 을나타냄.
+                    Console.WriteLine($"[From Client] {recvData}");
+                    RegisterRecv();
+                }
+                catch(Exception e)
+                {
+                    Console.WriteLine($"OnRecCompleted Failed{e}");
+                }
+            }
+            else
+            {
+                Disconnect();
+            }
+        }
+        #endregion
+    }
+}
