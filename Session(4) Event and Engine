@@ -1,0 +1,270 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ServerCore
+{
+    abstract class Session
+    {
+        Socket _socket;
+        int _disconnected = 0;
+
+
+
+        object _lock = new object();                                    // 동시다발적인 전송과 수신을 막기위해서 lock 을 사용.
+        Queue<byte[]> _sendQueue = new Queue<byte[]>();                 // 전송 데이터를 한번에 모아서 보내기위해서 큐에 모아둘 저장공간을 생성
+    
+        SocketAsyncEventArgs _sendArgs = new SocketAsyncEventArgs();
+        SocketAsyncEventArgs _recvArgs = new SocketAsyncEventArgs();
+        List<ArraySegment<byte>> _pendingList = new List<ArraySegment<byte>>();
+
+        public abstract void OnConnected(EndPoint endPoint);
+        public abstract void OnRecv(ArraySegment<byte> Buffer);
+        public abstract void OnSend(int numOfBytes);
+        public abstract void OnDisconnected(EndPoint endPoint);
+        public void Start(Socket socket)
+        {
+            _socket = socket;
+            _recvArgs.Completed += new EventHandler<SocketAsyncEventArgs>(OnRecvCompleted);
+            _recvArgs.SetBuffer(new byte[1024], 0, 1024);    // 총 크기, 사용할 부분 시작, 끝
+
+            _sendArgs.Completed += new EventHandler<SocketAsyncEventArgs>(OnSendCompleted);
+
+            RegisterRecv();
+        }
+
+        public void Disconnect()
+        {
+            if (Interlocked.Exchange(ref _disconnected, 1) == 1)
+                return;
+
+            OnDisconnected(_socket.RemoteEndPoint);
+            _socket.Shutdown(SocketShutdown.Both);                      // 손님과 연락하던 핸드폰을 송수신 불가능으로 만듬
+            _socket.Close();
+        }
+
+        public void Send(byte[] sendBuff)
+        {
+            lock (_lock)    // 한번에 한명만 전송 작업에 들어옴.
+            {
+                _sendQueue.Enqueue(sendBuff);       // 보낼내용 저장
+                if (_pendingList.Count == 0)        // 전송중인 데이터가 없다면
+                    RegisterSend();
+            }
+            
+        }
+        
+        #region 네트워크통신
+
+        void RegisterSend()
+        {                              // RegisterSend에 들어온 후 true로 만듦으로써 다음 전송 내용을 큐에 미리 저장해둘 수 있도록함. 만약 false면 Send에서 등록으로 바로 넘어오기때문에 문제가 생길수있음.
+            /*byte[] buff = _sendQueue.Dequeue();       */      // 저장되어있는 배열 자체를 가져옴 buff = [10] [12] [34] [56].
+            /*_sendArgs.SetBuffer(buff, 0, buff.Length);*/      // 저장되어있는 내용을 가져옴. lenght는 4가된다. // setbuffer는 args 내부 버퍼에 전송할 데이터들을 준비시킨다 라는 의미.
+
+            // SetBuffer는 데이터를 큰 배열(상자)을 만들어서 그안에 넣고 전송대기를 시켜 메모리 복사가 발생하는데 [1] [2] [3] [4] -> [1234]되어서 전송
+            // BufferList를 이용하면 각각의 작은 데이터들을 순서에 맞게 저장시켜 전송대기를 시킴 으로써 추가적인 작업없이 전송가능함. [1] [2] [3] [4] -> [1] [2] [3] [4] 각각의 조각으로 전송
+
+            while (_sendQueue.Count > 0)
+            {
+                byte[] buff = _sendQueue.Dequeue();
+                _pendingList.Add(new ArraySegment<byte>(buff, 0, buff.Length)); // new : 기본적으로 어떤 타입이든 인스턴스(객체)를 생성할때 쓴다. // ArraySegment<byte>(a, b, c) : byte타입의 ArraySegment의 매개변수를 받는 생성자를 호출해서 생성한다.
+            }
+
+            _sendArgs.BufferList = _pendingList;    
+
+            bool pending = _socket.SendAsync(_sendArgs);
+            if (pending == false)
+                OnSendCompleted(null, _sendArgs);
+        }
+
+        void OnSendCompleted(object sender, SocketAsyncEventArgs args)
+        {   
+            lock (_lock)                    // 콜백함수로 들어오는 경우를 커버해주기위해서 락으로 걸어줌
+            {
+                if (args.BytesTransferred > 0 && args.SocketError == SocketError.Success)
+                {
+                    try
+                    {
+                        _sendArgs.BufferList = null;
+                        _pendingList.Clear();
+
+                        OnSend(_sendArgs.BytesTransferred);
+
+                        if (_sendQueue.Count > 0)           // 서버에서 전송하는 동안(_pendingList.Count == 0) Queue에 전송데이터가 저장되어있다면
+                            RegisterSend();                 
+                               
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"OnRecCompleted Failed{e}");
+                    }
+                }
+            }
+            
+        }
+
+        void RegisterRecv()
+        {
+            bool pending = _socket.ReceiveAsync(_recvArgs);
+            if (pending == false )
+                    OnRecvCompleted(null, _recvArgs);       
+        }
+        void OnRecvCompleted(object sender, SocketAsyncEventArgs args)
+        {
+
+            if(args.BytesTransferred > 0 && args.SocketError == SocketError.Success) //BytesTransferred 몇바이트를 가져왔느냐 0바이트는 상대방이 연결을 끊은경우를 나타냄. 지금 조건은 상대방과 연결이 되어있고 클라이언트의 접속이 완료 되었을 경우를 조건으로 봄.
+            {
+                try
+                {
+                    OnRecv(new ArraySegment<byte>(args.Buffer, args.Offset, args.BytesTransferred));
+                    
+                    RegisterRecv();
+                }
+                catch(Exception e)
+                {
+                    Console.WriteLine($"OnRecCompleted Failed{e}");
+                }
+            }
+            else
+            {
+                Disconnect();
+            }
+        }
+        #endregion
+    }
+}
+
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+
+namespace ServerCore    //식당(서버)
+{
+    class GameSession : Session
+    {
+  
+
+        public override void OnConnected(EndPoint endPoint)
+        {
+            Console.WriteLine($"OnConnected {endPoint}");
+
+            byte[] sendBuff = Encoding.UTF8.GetBytes("Welcome to MMORPG Server !"); // 손님에게 보낼 내용을 인코딩 해서 byte형태로 저장
+            Send(sendBuff);
+            Thread.Sleep(1000);
+            Disconnect();
+
+        }
+
+        public override void OnDisconnected(EndPoint endPoint)
+        {
+            Console.WriteLine($"OnDisconnected {endPoint}");
+
+        }
+
+        public override void OnRecv(ArraySegment<byte> Buffer)
+        {
+            string recvData = Encoding.UTF8.GetString(Buffer.Array, Buffer.Offset, Buffer.Count); //Buffer는 바이트의 총량 / offset은 시작점 / bytesTransferred 는 클라이언트로 부터 받은 바이트(내용) 을나타냄.
+            Console.WriteLine($"[From Client] {recvData}");
+        }
+
+        public override void OnSend(int numOfBytes)
+        {
+            Console.WriteLine($"Transfferd bytes{numOfBytes}");
+
+        }
+    }
+
+
+    class Program
+    {
+        static Listener _listener = new Listener();
+       
+        static void Main(string[] args)
+        {
+            //DNS 도메인
+            string host = Dns.GetHostName();                // 로컬 호스트명(내 컴퓨터의 이름)을 가져온다. 도메인과는 다른 개념으로 컴퓨터 자체의 이름을 뜻한다.
+            IPHostEntry ipHost = Dns.GetHostEntry(host);    // 호스트에 들어가서 사용중인 ip 리스트를 가져온다
+            IPAddress ipAddr = ipHost.AddressList[0];       // 식당 주소를 가져옴. 가져온 ip 리스트중 가장 첫번째 ip주소를 가져옴.
+            IPEndPoint endPoint = new IPEndPoint(ipAddr, 7777); // 최종적으로 식당의 위치와 문을 지정해줌. 가져온 식당 주소와 7777이라는 포트(식당의 문) 번호를 설정해줌.
+
+
+            _listener.Init(endPoint, () => { return new GameSession(); });
+            Console.WriteLine("Listening...");
+
+            while (true) // 손님이 없으면 대기한다.
+            {
+                ;
+            }
+        }
+    }
+}
+
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ServerCore
+{
+    class Listener  //문지기를 분리해서 관리
+    {
+        Socket _listenSocket;
+        Func<Session> _sessionFactory; //반환 값 없는 델레게이트 함수를 받아오기위해 선언? 
+
+        public void Init(IPEndPoint endPoint, Func<Session> sessionFactory )  // 식당의 주소와 핸드폰 생성 함수를 델레게이트로 받아와서 문지기 초기화.
+        {
+           
+            _listenSocket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);  //문지기이자 문지기의 핸드폰(손님과의 소통(문의)을위한)을 만들어줌
+            _sessionFactory += sessionFactory;        // 매개 변수로 받은 함수를 구독?
+
+            // 문지기 교육 손님을 받을 준비
+            // 문지기에게 식당의 위치와 문 위치를 알려줌. 식당입구에 배치
+            _listenSocket.Bind(endPoint);
+
+            // 영업시작 손님이 오길 기다림
+            // 최대 대기자 수를 10으로 제한
+            _listenSocket.Listen(10);   
+
+            SocketAsyncEventArgs args = new SocketAsyncEventArgs();                             // args는 문지기 Socket의 현재 상태를 받아옴. 클라이언트의 현재 상황을 나타냄 (Accept, send, receive, Error(입장 성공/실패))  
+            args.Completed += new EventHandler<SocketAsyncEventArgs>(OnAcceptCompleted);        // 손님이 pending = true (보류중) 에 식당에 들어왔을 때를 대비해서 Handler를 Completed 상황에 자동으로 실행되도록 함수를 구독함.
+            RegisterAccept(args);                                                               
+        }
+
+
+
+        void RegisterAccept(SocketAsyncEventArgs args)  // 초기화에서 바로 등록함수로 args(손님의 상태)를 매개변수로 받아서 들어옴
+        {                                               
+            args.AcceptSocket = null;                   // 클라이언트 대리자 생성 후 다음 손님을 받기위해 null로 초기화. AcceptSocket은 손님
+
+            bool pending = _listenSocket.AcceptAsync(args); // pending -> 보류중 을 뜻하기 때문에 _listenSocket.AcceptAsync로 현재 접근 중인지 bool값으로 확인
+            if (pending == false)                           // 보류중이 아닌 영업이 시작되자마자 손님이 들어왔을 경우만 처리 해주기때문에 위에 초기화 함수에서 따로 델레게이트를 받음.
+                OnAcceptCompleted(_listenSocket, args);     // sender(이벤트 발생 주체) : 문지기 , args(손님의 상태) : 손님 소켓의 상태 
+        }
+
+
+
+        void OnAcceptCompleted(object sender, SocketAsyncEventArgs args)        // sender는 문지기 자체를 받고 args는 손님의 소켓을 받아옴
+        {
+            if(args.SocketError == SocketError.Success)     // 클라이언트가 입장을 완료 했다면
+            {
+                Session session = _sessionFactory.Invoke();
+                session.Start(args.AcceptSocket);
+                session.OnConnected(args.AcceptSocket.RemoteEndPoint);
+            }
+            else
+                Console.WriteLine(args.SocketError.ToString());     //클라이언트의 소캣이 생성 되지않았을 시 에러내용 출력
+
+            RegisterAccept(args);   // 소캣 생성이 완료되었으니 다음 손님을 받기위해 다시 등록 RegisterAccept로 돌아감 사실상 초기 Init을 해주면 while문을 도는것과 같은 현상을 보임.
+        }
+
+    }
+}
