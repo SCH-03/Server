@@ -1,0 +1,68 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ServerCore
+{
+    public class RecvBuffer
+    {
+
+        // [r] [] [w] [] [] [] [] [] [] []  10바이트 버퍼
+        ArraySegment<byte> _buffer;
+        int _readPos;       // 읽어들여야 할 시작점
+        int _writePos;      // 다음 받을 정보의 시작점
+
+        public RecvBuffer(int bufferSize)
+        {
+            _buffer = new ArraySegment<byte>(new byte[bufferSize], 0, bufferSize);  // 총 버퍼 사이즈 1. new byte로 가져오는이유
+
+        }
+
+        public int DataSize { get { return _writePos - _readPos; } }        // 시작이 0이기때문에
+        public int FreeSize { get { return _buffer.Count - _writePos; } }
+
+        public ArraySegment<byte> ReadSegment
+        {
+            get { return new ArraySegment<byte>(_buffer.Array, _buffer.Offset + _readPos, DataSize); }      // 2. _buffer.Array는 사이즈 자체를 가져오는 것? Offset은 시작점 즉 항상 0을 나타내나?
+        }
+        public ArraySegment<byte> WriteSegment
+        {
+            get { return new ArraySegment<byte>(_buffer.Array, _buffer.Offset + _writePos, FreeSize); }     // 3. FreeSize가 아닌 _buffer 가 들어가야하는 것이아닌가 지금 FreeSize는 8인데 그럼 2부터 8번까지만 정보를 받아올수있다는건데 10번까지 받아와야하는것이아닌가?
+        }
+        
+        public void Clean()
+        {
+            int dataSize = DataSize;
+
+            if(dataSize == 0)
+            {
+                _readPos = _writePos = 0;
+            }
+            else
+            {
+                Array.Copy(_buffer.Array, _buffer.Offset + _readPos, _buffer.Array, _buffer.Offset, dataSize);
+                _readPos = 0;
+                _writePos = dataSize;
+            }
+        }
+        public bool OnRead(int numOfBytes)
+        {
+            if(numOfBytes > DataSize)
+                return false;
+
+            _readPos += numOfBytes;
+            return true;
+        }
+
+        public bool OnWrite(int numOfBytes)
+        {
+            if (numOfBytes > FreeSize)
+                return false;
+
+            _writePos += numOfBytes;
+            return true;
+        }
+    }
+}
